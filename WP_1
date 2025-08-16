@@ -1,0 +1,42 @@
+let lastNotification = 0; // Zeitstempel der letzten Benachrichtigung (Unix-Zeit ms)
+
+on({ id: "smartmeter.0.1-0:16_7_0__255.value", change: "ne" }, async (obj) => {
+    const now = Date.now();
+    
+    // 1. Abbruch, wenn weniger als 1h vergangen ist
+    if (now - lastNotification < 3600000) { // 3600000 ms = 1 Stunde
+        console.log("⏳ Nachricht wurde in der letzten Stunde schon gesendet – überspringe.");
+        return;
+    }
+
+    // 2. Aktuelle Werte prüfen
+    const powerInitiallyOn = await getStateAsync("daikin.0.control.power");
+    const consumptionInitially = await getStateAsync("smartmeter.0.1-0:16_7_0__255.value");
+
+    if (powerInitiallyOn?.val === true && consumptionInitially?.val > 400) {
+        console.log("⚠️ Bedingungen erfüllt – Warte 5 Minuten zur Kontrolle...");
+
+        await new Promise(resolve => setTimeout(resolve, 300000)); // 5 Minuten warten
+
+        const powerAfter = await getStateAsync("daikin.0.control.power");
+        const consumptionAfter = await getStateAsync("smartmeter.0.1-0:16_7_0__255.value");
+
+        if (powerAfter?.val === true && consumptionAfter?.val > 100) {
+            const tempIndoor = (await getStateAsync("daikin.0.sensorInfo.indoorTemperature")).val;
+            const tempOutdoor = (await getStateAsync("daikin.0.sensorInfo.outdoorTemperature")).val;
+
+            const message = `📈 Stromverbrauch >400W & Klima läuft!
+Verbrauch in Watt: ${consumptionAfter.val}
+Status Klima: ${powerAfter.val}
+Temperatur Loft in/out: ${tempIndoor} / ${tempOutdoor}`;
+
+            sendTo("whatsapp-cmb", "send", { text: message });
+            console.log("✅ WhatsApp-Nachricht gesendet!");
+
+            lastNotification = now; // Zeitstempel aktualisieren
+        } else {
+            console.log("🕓 Bedingungen nach 5 Minuten nicht mehr erfüllt – keine Nachricht gesendet.");
+        }
+    }
+});
+
